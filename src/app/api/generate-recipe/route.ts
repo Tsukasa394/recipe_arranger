@@ -121,25 +121,177 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const text = response.text;
+    // レスポンスからテキストを取得
+    let text = response.text;
+    
+    // フォールバック: candidatesから直接テキストを取得
+    if (!text && response.candidates && response.candidates.length > 0) {
+      const firstCandidate = response.candidates[0];
+      if (firstCandidate.content && firstCandidate.content.parts) {
+        const textParts = firstCandidate.content.parts
+          .filter((part: any) => part.text)
+          .map((part: any) => part.text)
+          .join('');
+        if (textParts) {
+          console.log('Using fallback text from candidates');
+          text = textParts;
+        }
+      }
+    }
+    
+    if (!text) {
+      console.error('Empty response from Gemini API');
+      console.error('Response object keys:', Object.keys(response));
+      console.error('Response candidates:', response.candidates);
+      return NextResponse.json(
+        { error: 'レシピの生成に失敗しました。APIからの応答が空です' },
+        { status: 500 }
+      );
+    }
+    
+    return processGeminiResponse(text);
+  } catch (error) {
+    console.error('API error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error details:', errorMessage);
+    return NextResponse.json(
+      { error: '予期しないエラーが発生しました', details: errorMessage },
+      { status: 500 }
+    );
+  }
+}
+
+// Gemini APIレスポンスを処理する関数
+function processGeminiResponse(text: string): NextResponse {
+  console.log('Gemini API response length:', text.length);
+  console.log('Gemini API response (first 500 chars):', text.substring(0, 500));
 
     // JSONの抽出（```json や ``` で囲まれている可能性がある）
     let jsonText = text.trim();
+    
+    // コードブロックを除去
     if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+      jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/g, '');
     }
+    
+    // 先頭・末尾の不要な文字を除去
+    jsonText = jsonText.trim();
+    
+    // JSONオブジェクトの開始位置を探す
+    const jsonStart = jsonText.indexOf('{');
+    
+    if (jsonStart === -1) {
+      console.error('No JSON object found in response');
+      return NextResponse.json(
+        { error: 'レシピの生成に失敗しました。JSON形式が見つかりません' },
+        { status: 500 }
+      );
+    }
+    
+    // ネストされたJSONを正しく抽出するため、括弧のバランスを取る
+    // 文字列内の括弧を無視する必要がある
+    let braceCount = 0;
+    let jsonEnd = -1;
+    let inString = false;
+    let escapeNext = false;
+    
+    for (let i = jsonStart; i < jsonText.length; i++) {
+      const char = jsonText[i];
+      
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{') {
+          braceCount++;
+        } else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            jsonEnd = i;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (jsonEnd === -1 || jsonEnd <= jsonStart) {
+      console.error('Invalid JSON structure, braceCount:', braceCount);
+      // フォールバック: 最後の}を使用
+      jsonEnd = jsonText.lastIndexOf('}');
+      if (jsonEnd <= jsonStart) {
+        return NextResponse.json(
+          { error: 'レシピの生成に失敗しました。JSON構造が不正です' },
+          { status: 500 }
+        );
+      }
+    }
+    
+    jsonText = jsonText.substring(jsonStart, jsonEnd + 1);
 
     // JSONパース
     let recipeData: { recipes: any[] };
     try {
+      console.log('Attempting to parse JSON, length:', jsonText.length);
       recipeData = JSON.parse(jsonText);
+      console.log('JSON parsed successfully, recipes count:', recipeData.recipes?.length);
+      
+      // レシピが3つあるか確認
+      if (!recipeData.recipes || !Array.isArray(recipeData.recipes) || recipeData.recipes.length === 0) {
+        console.error('Invalid recipes array:', recipeData);
+        return NextResponse.json(
+          { error: 'レシピの生成に失敗しました。レシピデータが不正です' },
+          { status: 500 }
+        );
+      }
     } catch (parseError) {
       console.error('JSON parse error:', parseError);
-      console.error('Response text:', text);
-      return NextResponse.json(
-        { error: 'レシピの生成に失敗しました。もう一度お試しください' },
-        { status: 500 }
-      );
+      console.error('Response text length:', text.length);
+      console.error('Response text (first 1000 chars):', text.substring(0, 1000));
+      console.error('Extracted JSON text length:', jsonText.length);
+      console.error('Extracted JSON text (first 1000 chars):', jsonText.substring(0, 1000));
+      console.error('Extracted JSON text (last 500 chars):', jsonText.substring(Math.max(0, jsonText.length - 500)));
+      
+      // エスケープされたJSON文字列の可能性をチェック
+      try {
+        const unescaped = jsonText.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+        recipeData = JSON.parse(unescaped);
+        console.log('Successfully parsed after unescaping');
+      } catch (secondParseError) {
+        console.error('Second parse also failed:', secondParseError);
+        
+        // デバッグ用: レスポンスの一部を返す（開発環境のみ）
+        if (process.env.NODE_ENV === 'development') {
+          return NextResponse.json(
+            { 
+              error: 'レシピの生成に失敗しました。もう一度お試しください',
+              debug: {
+                originalTextLength: text.length,
+                extractedJsonLength: jsonText.length,
+                extractedJsonPreview: jsonText.substring(0, 500),
+                extractedJsonEnd: jsonText.substring(Math.max(0, jsonText.length - 200))
+              }
+            },
+            { status: 500 }
+          );
+        }
+        
+        return NextResponse.json(
+          { error: 'レシピの生成に失敗しました。もう一度お試しください' },
+          { status: 500 }
+        );
+      }
     }
 
     // レスポンス形式に変換
@@ -149,12 +301,5 @@ export async function POST(request: NextRequest) {
     };
 
     return NextResponse.json(recipeResponse);
-  } catch (error) {
-    console.error('API error:', error);
-    return NextResponse.json(
-      { error: '予期しないエラーが発生しました' },
-      { status: 500 }
-    );
-  }
 }
 
