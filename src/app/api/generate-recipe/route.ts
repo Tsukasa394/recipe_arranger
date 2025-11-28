@@ -228,9 +228,38 @@ function processGeminiResponse(text: string): NextResponse {
     
     if (jsonEnd === -1 || jsonEnd <= jsonStart) {
       console.error('Invalid JSON structure, braceCount:', braceCount);
-      // フォールバック: 最後の}を使用
-      jsonEnd = jsonText.lastIndexOf('}');
-      if (jsonEnd <= jsonStart) {
+      // フォールバック: 最後の}を使用（ただし、文字列内でないことを確認）
+      let lastBrace = -1;
+      let inStringFallback = false;
+      let escapeNextFallback = false;
+      
+      for (let i = jsonText.length - 1; i >= jsonStart; i--) {
+        const char = jsonText[i];
+        
+        if (escapeNextFallback) {
+          escapeNextFallback = false;
+          continue;
+        }
+        
+        if (char === '\\') {
+          escapeNextFallback = true;
+          continue;
+        }
+        
+        if (char === '"') {
+          inStringFallback = !inStringFallback;
+          continue;
+        }
+        
+        if (!inStringFallback && char === '}') {
+          lastBrace = i;
+          break;
+        }
+      }
+      
+      if (lastBrace > jsonStart) {
+        jsonEnd = lastBrace;
+      } else {
         return NextResponse.json(
           { error: 'レシピの生成に失敗しました。JSON構造が不正です' },
           { status: 500 }
