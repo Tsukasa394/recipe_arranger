@@ -50,29 +50,70 @@ ${ingredientsText}
 - 調理時間: ${time}分以内
 - 家庭にある調味料は自由に使用可能
 
-# 出力形式（JSON）
-以下のJSON形式で回答してください:
-{
-  "recipes": [
-    {
-      "title": "レシピ名",
-      "description": "一言説明（30文字以内）",
-      "difficulty": "かんたん",
-      "cookingTime": 15,
-      "additionalIngredients": ["追加食材1", "追加食材2"],
-      "steps": ["手順1", "手順2", "手順3"],
-      "tips": "美味しく作るコツ"
-    }
-  ]
-}
-
 # 制約
 - 追加食材は最大3つまで
 - 手順は5ステップ以内
 - 実現可能性を重視
-- 回答は定義されたJSON形式に厳密に従ってください。
-- 挨拶、説明、感謝の言葉、注釈、説明文などJSON構造以外のテキストは一切出力しないでください。
-- 出力はJSON形式の内容のみとし、前後の余計な文字列やコメントも含めないでください。`;
+- レシピは必ず3つ生成してください`;
+}
+
+// JSONスキーマ定義
+function getRecipeJsonSchema() {
+  return {
+    type: 'object',
+    properties: {
+      recipes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            title: {
+              type: 'string',
+              description: 'レシピ名'
+            },
+            description: {
+              type: 'string',
+              description: '一言説明（30文字以内）'
+            },
+            difficulty: {
+              type: 'string',
+              enum: ['すごくかんたん', 'かんたん', 'ふつう', 'むずかしい'],
+              description: '難易度'
+            },
+            cookingTime: {
+              type: 'number',
+              description: '調理時間（分）'
+            },
+            additionalIngredients: {
+              type: 'array',
+              items: {
+                type: 'string'
+              },
+              maxItems: 3,
+              description: '追加食材リスト（最大3つ）'
+            },
+            steps: {
+              type: 'array',
+              items: {
+                type: 'string'
+              },
+              maxItems: 5,
+              description: '手順リスト（最大5ステップ）'
+            },
+            tips: {
+              type: 'string',
+              description: 'コツ・アドバイス'
+            }
+          },
+          required: ['title', 'description', 'difficulty', 'cookingTime', 'additionalIngredients', 'steps', 'tips']
+        },
+        minItems: 3,
+        maxItems: 3,
+        description: 'レシピ配列（3つ）'
+      }
+    },
+    required: ['recipes']
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -119,7 +160,9 @@ export async function POST(request: NextRequest) {
       contents: prompt,
       config: {
         temperature: 0.7,
-        maxOutputTokens: 2048,
+        maxOutputTokens: 4096,
+        responseMimeType: 'application/json',
+        responseJsonSchema: getRecipeJsonSchema(),
       },
     });
 
@@ -164,173 +207,72 @@ export async function POST(request: NextRequest) {
 }
 
 // Gemini APIレスポンスを処理する関数
+// responseMimeType: 'application/json'が設定されているため、レスポンスはJSON形式で返される
 function processGeminiResponse(text: string): NextResponse {
   console.log('Gemini API response length:', text.length);
   console.log('Gemini API response (first 500 chars):', text.substring(0, 500));
 
-    // JSONの抽出（```json や ``` で囲まれている可能性がある）
-    let jsonText = text.trim();
+  // JSON形式で返されるため、直接パースを試みる
+  let jsonText = text.trim();
+  
+  // 念のため、コードブロックを除去（通常は不要だが、互換性のため）
+  if (jsonText.startsWith('```')) {
+    jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/g, '');
+  }
+  
+  jsonText = jsonText.trim();
+
+  // JSONパース
+  let recipeData: { recipes: any[] };
+  try {
+    recipeData = JSON.parse(jsonText);
+    console.log('JSON parsed successfully, recipes count:', recipeData.recipes?.length);
     
-    // コードブロックを除去
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/g, '');
-    }
-    
-    // 先頭・末尾の不要な文字を除去
-    jsonText = jsonText.trim();
-    
-    // JSONオブジェクトの開始位置を探す
-    const jsonStart = jsonText.indexOf('{');
-    
-    if (jsonStart === -1) {
-      console.error('No JSON object found in response');
+    // レシピが3つあるか確認
+    if (!recipeData.recipes || !Array.isArray(recipeData.recipes) || recipeData.recipes.length === 0) {
+      console.error('Invalid recipes array:', recipeData);
       return NextResponse.json(
-        { error: 'レシピの生成に失敗しました。JSON形式が見つかりません' },
+        { error: 'レシピの生成に失敗しました。レシピデータが不正です' },
         { status: 500 }
       );
     }
     
-    // ネストされたJSONを正しく抽出するため、括弧のバランスを取る
-    // 文字列内の括弧を無視する必要がある
-    let braceCount = 0;
-    let jsonEnd = -1;
-    let inString = false;
-    let escapeNext = false;
+    // レシピが3つ未満の場合は警告をログに記録
+    if (recipeData.recipes.length < 3) {
+      console.warn(`Expected 3 recipes, but got ${recipeData.recipes.length}`);
+    }
+  } catch (parseError) {
+    console.error('JSON parse error:', parseError);
+    console.error('Response text length:', text.length);
+    console.error('Response text (first 1000 chars):', text.substring(0, 1000));
     
-    for (let i = jsonStart; i < jsonText.length; i++) {
-      const char = jsonText[i];
-      
-      if (escapeNext) {
-        escapeNext = false;
-        continue;
-      }
-      
-      if (char === '\\') {
-        escapeNext = true;
-        continue;
-      }
-      
-      if (char === '"') {
-        inString = !inString;
-        continue;
-      }
-      
-      if (!inString) {
-        if (char === '{') {
-          braceCount++;
-        } else if (char === '}') {
-          braceCount--;
-          if (braceCount === 0) {
-            jsonEnd = i;
-            break;
+    // デバッグ用: レスポンスの一部を返す（開発環境のみ）
+    if (process.env.NODE_ENV === 'development') {
+      return NextResponse.json(
+        { 
+          error: 'レシピの生成に失敗しました。JSONパースエラーが発生しました',
+          debug: {
+            originalTextLength: text.length,
+            responsePreview: text.substring(0, 500),
+            parseError: parseError instanceof Error ? parseError.message : String(parseError)
           }
-        }
-      }
+        },
+        { status: 500 }
+      );
     }
     
-    if (jsonEnd === -1 || jsonEnd <= jsonStart) {
-      console.error('Invalid JSON structure, braceCount:', braceCount);
-      // フォールバック: 最後の}を使用（ただし、文字列内でないことを確認）
-      let lastBrace = -1;
-      let inStringFallback = false;
-      let escapeNextFallback = false;
-      
-      for (let i = jsonText.length - 1; i >= jsonStart; i--) {
-        const char = jsonText[i];
-        
-        if (escapeNextFallback) {
-          escapeNextFallback = false;
-          continue;
-        }
-        
-        if (char === '\\') {
-          escapeNextFallback = true;
-          continue;
-        }
-        
-        if (char === '"') {
-          inStringFallback = !inStringFallback;
-          continue;
-        }
-        
-        if (!inStringFallback && char === '}') {
-          lastBrace = i;
-          break;
-        }
-      }
-      
-      if (lastBrace > jsonStart) {
-        jsonEnd = lastBrace;
-      } else {
-        return NextResponse.json(
-          { error: 'レシピの生成に失敗しました。JSON構造が不正です' },
-          { status: 500 }
-        );
-      }
-    }
-    
-    jsonText = jsonText.substring(jsonStart, jsonEnd + 1);
+    return NextResponse.json(
+      { error: 'レシピの生成に失敗しました。もう一度お試しください' },
+      { status: 500 }
+    );
+  }
 
-    // JSONパース
-    let recipeData: { recipes: any[] };
-    try {
-      console.log('Attempting to parse JSON, length:', jsonText.length);
-      recipeData = JSON.parse(jsonText);
-      console.log('JSON parsed successfully, recipes count:', recipeData.recipes?.length);
-      
-      // レシピが3つあるか確認
-      if (!recipeData.recipes || !Array.isArray(recipeData.recipes) || recipeData.recipes.length === 0) {
-        console.error('Invalid recipes array:', recipeData);
-        return NextResponse.json(
-          { error: 'レシピの生成に失敗しました。レシピデータが不正です' },
-          { status: 500 }
-        );
-      }
-    } catch (parseError) {
-      console.error('JSON parse error:', parseError);
-      console.error('Response text length:', text.length);
-      console.error('Response text (first 1000 chars):', text.substring(0, 1000));
-      console.error('Extracted JSON text length:', jsonText.length);
-      console.error('Extracted JSON text (first 1000 chars):', jsonText.substring(0, 1000));
-      console.error('Extracted JSON text (last 500 chars):', jsonText.substring(Math.max(0, jsonText.length - 500)));
-      
-      // エスケープされたJSON文字列の可能性をチェック
-      try {
-        const unescaped = jsonText.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-        recipeData = JSON.parse(unescaped);
-        console.log('Successfully parsed after unescaping');
-      } catch (secondParseError) {
-        console.error('Second parse also failed:', secondParseError);
-        
-        // デバッグ用: レスポンスの一部を返す（開発環境のみ）
-        if (process.env.NODE_ENV === 'development') {
-          return NextResponse.json(
-            { 
-              error: 'レシピの生成に失敗しました。もう一度お試しください',
-              debug: {
-                originalTextLength: text.length,
-                extractedJsonLength: jsonText.length,
-                extractedJsonPreview: jsonText.substring(0, 500),
-                extractedJsonEnd: jsonText.substring(Math.max(0, jsonText.length - 200))
-              }
-            },
-            { status: 500 }
-          );
-        }
-        
-        return NextResponse.json(
-          { error: 'レシピの生成に失敗しました。もう一度お試しください' },
-          { status: 500 }
-        );
-      }
-    }
+  // レスポンス形式に変換
+  const recipeResponse: RecipeResponse = {
+    recipes: recipeData.recipes || [],
+    generatedAt: new Date().toISOString(),
+  };
 
-    // レスポンス形式に変換
-    const recipeResponse: RecipeResponse = {
-      recipes: recipeData.recipes || [],
-      generatedAt: new Date().toISOString(),
-    };
-
-    return NextResponse.json(recipeResponse);
+  return NextResponse.json(recipeResponse);
 }
 
