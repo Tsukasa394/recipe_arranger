@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
+    "@marp-team/marp-cli": "^4.2.3",
     "next": "16.0.5",
     "react": "19.2.0",
     "react-dom": "19.2.0"
