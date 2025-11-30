@@ -501,3 +501,4 @@ stateDiagram-v2
 2. Vercelでプロジェクトをインポート
 3. 環境変数 `GEMINI_API_KEY` を設定
 4. 自動デプロイ実行
+
