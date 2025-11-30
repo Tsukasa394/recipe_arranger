@@ -38,7 +38,8 @@ cd docs/presentation/diagrams
 
 ### 1.5 エクスポート
 ````
-marp presentation.md -o presentation.pdf --allow-local-files
+cd docs/presentation
+npx marp presentation.md -o presentation.pdf --allow-local-files
 ````
 
 ### 1.6 参照資料
