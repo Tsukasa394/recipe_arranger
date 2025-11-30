@@ -4,13 +4,20 @@
 
 ### 1.1 作成環境
 - マークダウンのmarp記法を利用する
-- 図表はmermaid記法を利用する
+- 図表はmermaid記法を利用する（mermaid-cliでSVGに変換）
 - marp-cliでPDFに出力する
 
 ### 1.2 準備物
 - **marp.md**: プレゼン資料作成方針（本資料）
 - **presentation.md**: プレゼン資料用マークダウン
 - **style.css**: プレゼン資料デザインCSS
+- **diagrams/**: mermaid図表のmmdファイル格納ディレクトリ
+- **images/**: 変換後のSVG画像格納ディレクトリ
+
+### 1.2.1 Mermaid図表の管理
+- mermaid図表は `diagrams/*.mmd` ファイルとして独立して管理
+- presentation.mdには直接mermaid表記を書かず、SVG画像として参照
+- mermaid-cliを使用してmmdファイルをSVGに変換
 
 ### 1.3 環境変数（プレースホルダー）
 - **AUTHOR**: 作成者の所属と氏名
@@ -18,12 +25,23 @@
 - PDF出力前に、テキストエディタの検索置換機能などで `{{AUTHOR}}` を実際の値に置換すること
 - 例: `{{AUTHOR}}` → `株式会社○○ 山田太郎`
 
-### 1.4 エクスポート
+### 1.4 Mermaid図表の変換
+mermaid-cliを使用してmmdファイルをSVGに変換します。
+
+**変換コマンド**:
+```bash
+cd docs/presentation/diagrams
+./convert-to-svg.sh
+```
+
+**注意**: PDF出力前に、必ずmermaid図表をSVGに変換しておくこと
+
+### 1.5 エクスポート
 ````
 marp presentation.md -o presentation.pdf --allow-local-files
 ````
 
-### 1.5 参照資料
+### 1.6 参照資料
 - **[プロダクト概要](./docs/design/product.md)**: プロジェクトの背景、目的、機能仕様
 - **[システム仕様書](./docs/design/spec.md)**: 詳細な機能要件、API仕様、デプロイ仕様
 
