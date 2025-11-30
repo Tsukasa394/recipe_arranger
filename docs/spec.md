@@ -96,7 +96,7 @@
 **Gemini API設定**:
 - **モデル**: `gemini-2.5-flash`
 - **Temperature**: 0.7（創造性とバランス）
-- **MaxOutputTokens**: 2048
+- **MaxOutputTokens**: 4096
 
 **レート制限**:
 - 無料Gemini API: 15 RPM
@@ -474,7 +474,7 @@ stateDiagram-v2
   model: "gemini-2.5-flash",
   generationConfig: {
     temperature: 0.7,
-    maxOutputTokens: 2048,
+    maxOutputTokens: 4096,
   }
 }
 ```
